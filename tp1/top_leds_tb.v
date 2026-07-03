@@ -5,6 +5,7 @@ module top_leds_tb();
 
 localparam N_SWITCH = 4 ;
 localparam N_LED    = 4 ;
+localparam NB_COUNTER = 32;
 
 wire [N_LED - 1 : 0] o_led  ;
 wire [N_LED - 1 : 0] o_led_b;
@@ -58,17 +59,19 @@ end
 endtask
 
 
+// Descomentar solo uno de estos defines para ejecutar un test a la vez.
 `define TEST1
-`define TEST2
-`define TEST3
-`define TEST4
-`define TEST5
+// `define TEST2
+// `define TEST3
+// `define TEST4
+// `define TEST5
+// `define TEST6
 
 `ifdef TEST1 //enable
 
 // `include "./test1.sv"
 
-  localparam NB_COUNTER = 32;
+  
 
   reg [N_LED      - 1 : 0] prev_o_led    ;
   reg [NB_COUNTER - 1 : 0] clock_counter ;
@@ -170,37 +173,37 @@ end
 endfunction
 
 `ifdef TEST3 //color de leds
-  initial   
-  i_sw[3] = 'b0;
+  initial
   begin
-  force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
-  force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
-  force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
-  force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+    i_sw[3] = 1'b0;
+    force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
+    force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
+    force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
+    force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
 
-  for(integer i=0; i<100; i=i+1)
-  begin
-    i_sw[3] = $urandom_range(0,1);
-    i_sw[0]=$urandom_range(0,1);
-    if(i_sw[3]==1'b1)
+    for(integer i=0; i<100; i=i+1)
     begin
-      if(!verificar_color_azul())
+      i_sw[3] = $urandom_range(0,1);
+      i_sw[0] = $urandom_range(0,1);
+      if(i_sw[3]==1'b1)
       begin
-        $display("ERROR: Color incorrecto");
-        $finish(2);
+        if(!verificar_color_azul())
+        begin
+          $display("ERROR: Color incorrecto");
+          $finish(2);
+        end
+      end
+      else
+      begin
+        if(!verificar_color_verde())
+        begin
+          $display("ERROR: Color incorrecto");
+          $finish(2);
+        end
       end
     end
-    else
-    begin
-      if(!verificar_color_verde())
-      begin
-        $display("ERROR: Color incorrecto");
-        $finish(2);
-      end
-    end
-  end
-  $display("TEST PASSED");
-  $finish();
+    $display("TEST PASSED");
+    $finish();
   end
 
 
@@ -208,38 +211,51 @@ endfunction
 
 
 `ifdef TEST4 //clock
-  reg [N_LED-1:0] estado_leds = 'b0;
-initial 
-begin
-  force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
-  force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
-  force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
-  force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
-
-  for(integer i=0; i<100; i=i+1)
+  reg [N_LED-1:0] estado_leds;
+  initial
   begin
-    #($urandom_range(1,5)*1us); //verificar limite
-    force clock = clock;
-    estado_leds = o_led;
-    #($urandom_range(1,5)*1us);
-    if(estado_leds != o_led)
+    force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
+    force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
+    force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
+    force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+
+    for(integer i=0; i<100; i=i+1)
     begin
+      #($urandom_range(1,5)*1us);
+      force clock = 1'b0;
+      estado_leds = o_led;
+      #($urandom_range(1,5)*1us);
+      if(estado_leds != o_led)
+      begin
+        release clock;
+        $display("ERROR: Cambio de estado asincronico");
+        $finish(2);
+      end
       release clock;
-      $display("ERROR : Cambio d  e estado asincronico");
-      $finish(2);
     end
+    $display("TEST PASSED");
+    $finish();
   end
-  release clock;
-  $display("TEST PASSED");
-  $finish();
-end
 `endif
 
+function [0:0] limite_incorrecto;
+  input reg [31:0] count;
+  begin
+    case(i_sw[2:1])
+      2'b00: limite_incorrecto = (count != u_top_leds.u_counter.limit_0+1);
+      2'b01: limite_incorrecto = (count != u_top_leds.u_counter.limit_1+1);
+      2'b10: limite_incorrecto = (count != u_top_leds.u_counter.limit_2+1);
+      2'b11: limite_incorrecto = (count != u_top_leds.u_counter.limit_3+1);
+      default: $display("Combinacion invalida");
+    endcase 
+  end
+endfunction
+
 `ifdef TEST5 //limites
-initial 
-reg count = 0;
-reg [N_LED-1:0] esperado = 'b0;
-reg [N_LED-1:0] estado_actual = 'b0;
+reg [31:0] count;
+reg [N_LED-1:0] esperado;
+reg [N_LED-1:0] estado_actual;
+initial
 begin
   force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
   force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
@@ -248,7 +264,7 @@ begin
 
   for(integer i=0; i<100; i=i+1)
   begin
-    count = 0;
+    count = 'b0;
     #($urandom_range(1,5)*1us)
     i_sw[2:1] = $urandom_range(0,3);
     //reseteo para conocer el valor inicial
@@ -262,6 +278,7 @@ begin
     while(o_led == estado_actual)
     begin
       @(posedge clock);
+      #1;
     end
 
     //alamceno valor luego del primer shift
@@ -270,6 +287,7 @@ begin
     while (o_led == estado_actual) 
     begin
       @(posedge clock);
+      #1; //espero un tiempo para que se actualicen los registros
       count=count+1;
     end
     //verifico que haga el shift de manera correcta
@@ -280,33 +298,152 @@ begin
         $finish(2);
     end
     //cambio el estado del led, verifico si efectivamente el cambio fue en el valor del limite
-    case(i_sw[2:1])
-      2'b00: if((count != u_top_leds.u_counter.limit_0+1))
-              begin
-                $display("ERROR: Cambia en otro limite");
-                $finish(2);
-              end
-      2'b01: if((count != u_top_leds.u_counter.limit_1+1))
-              begin
-                $display("ERROR: Cambia en otro limite");
-                $finish(2);
-              end
-      2'b10: if((count != u_top_leds.u_counter.limit_2+1))
-              begin
-                $display("ERROR: Cambia en otro limite");
-                $finish(2);
-              end
-      2'b11: if((count != u_top_leds.u_counter.limit_3+1))
-              begin
-                $display("ERROR: Cambia en otro limite");
-                $finish(2);
-              end
-      default $display("Combinacion invalida");
-    endcase 
+    if(limite_incorrecto(count))
+    begin
+      $display("ERROR: Cambio de estado en otro limite");
+      $finish(2);
+    end
   end
   $display("TEST PASSED");
   $finish();
 end
 `endif 
+
+`ifdef TEST6
+reg [N_LED-1:0] valor_actual;
+reg [N_LED-1:0] esperado;
+reg [NB_COUNTER-1:0] count;
+initial 
+begin
+  force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
+  force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
+  force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
+  force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+
+  for(integer i=0; i<100; i=i+1)
+  begin
+    //randomizar enable, limite y color
+    i_sw[3:0] = $urandom_range(0,15);
+
+    reset();
+    #1;
+    valor_actual = o_led;
+    //comprobamos que no cambie el valor con el enable desactivado
+    if(i_sw[0] == 0)
+    begin
+      //esperamos un tiempo random
+      #($urandom_range(1,5)*1us);
+      //no espero un cloc porque en el tiempo minimo 1us ya pasaron muchos clocks
+      if(o_led != valor_actual)
+      begin
+        $display("ERROR: CAMBIO DE ESTADO EN LOS LEDS");
+        $finish(2);
+      end
+      case (i_sw[3])
+        1'b1:
+        begin
+          if(!verificar_color_azul())
+          begin
+            $display("ERROR: COLOR INCORRECTO, ESPERADO: AZUL");
+            $finish(2);
+          end
+        end
+         
+        1'b0:
+        begin
+          if(!verificar_color_verde())
+          begin
+            $display("ERROR: COLOR INCORRECTO, ESPERADO: VERDE");
+            $finish(2);
+          end
+        end
+        default: $display("ERROR: Estado no valido para seleccionar color");
+      endcase
+    end
+    //cuando el enable esta activado
+    else
+    begin
+      //luego del reset count=0 entonces cambia inmediatamente, obvio ese primer shift
+      while(valor_actual == o_led)
+      begin
+        @(posedge clock);
+      end
+
+      //pasado el primer shift guardamos el estado real para verificar el shift con el limite
+      valor_actual = o_led;
+      //aseguro que el contador empiece en 0
+      count = 'b0;
+      while(valor_actual == o_led)
+      begin
+        @(posedge clock);
+        count = count + 1;
+      end
+      //cuando sale del while es porque shifteo es porque shifteo, compruebo que shiftee correctamente
+      esperado = {valor_actual[0], valor_actual[3:1]};
+      if(o_led != esperado)
+      begin
+        $display("ERROR: Shiteo incorrecto");
+        $finish(2);
+      end
+      //compruebo el valor del contador coincida con el limite establecido
+      if(limite_incorrecto(count))
+      begin
+        $display("ERROR: SHIFTEO EN VALOR DE LIMITE INCORRECTO");
+        $finish(2);
+      end
+    end
+  end
+  $display("TEST: PASSED");
+  $finish();
+end  
+
+`endif
+
+// `ifdef TEST6 //test de integracion
+//   reg [N_LED-1:0] estado_actual;
+//   reg [N_LED-1:0] esperado;
+//   reg [31:0] count;
+//   initial 
+//   begin
+//   force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
+//   force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
+//   force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
+//   force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+  
+//   for(integer i=0; i<100; i=i+1)
+//   begin
+//     i_sw[3:0] = $urandom_range(0,15);
+//     reset();
+//     estado_actual = o_led;
+//     count = 'b0;
+    
+//     #($urandom_range(1,5)*1us);
+//     if(i_sw[0] == 0 && o_led != estado_actual)
+//     begin
+//       $display("ERROR: Cambio el estado de los leds con el enable desactivado");
+//       $finish(2);
+//     end
+//     else if(i_sw[0] == 1)
+//     begin
+//       if(i_sw[3] == 0 && (!verificar_color_verde() || limite_incorrecto(count)))
+//       begin
+//         $display("ERROR: Fallo el test");
+//         $finish(2);
+//       end
+//       else if(i_sw[3] == 1 && (!verificar_color_azul() || limite_incorrecto(count)))
+//       begin
+//         $display("ERROR: Fallo el test");
+//         $finish(2);
+//       end
+//     end
+//   end
+//   $display("TEST PASSED");
+//   $finish();
+
+//  end
+
+//`endif
+
+
 endmodule
 
