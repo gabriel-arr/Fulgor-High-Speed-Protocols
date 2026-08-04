@@ -1,0 +1,24 @@
+# Vivado generated files
+.Xil/
+*.jou
+*.log
+*.pb
+*.wdb
+*.wcfg
+*.str
+
+*.cache/
+*.sim/
+*.runs/
+*.hw/
+*.ip_user_files/
+*.gen/
+
+# TP1 Vivado generated folders
+tp1/tp1_fulgor.cache/
+tp1/tp1_fulgor.sim/
+tp1/tp1_fulgor.hw/
+tp1/tp1_fulgor.ip_user_files/
+
+# Simulation binaries
+*.out

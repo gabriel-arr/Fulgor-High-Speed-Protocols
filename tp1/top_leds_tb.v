@@ -14,6 +14,7 @@ wire [N_LED - 1 : 0] o_led_g;
 reg  [N_SWITCH - 1 : 0] i_sw;
 reg                     i_reset;
 reg                     clock;
+reg                     clock_stopped;
 
 top_leds
 u_top_leds
@@ -32,9 +33,10 @@ u_top_leds
 //----> Generamos clock
 initial
 begin
-  clock   <= 'd0;
+  clock        <= 'd0;
+  clock_stopped <= 1'b0;
 end
-always #5 clock = ~clock;
+always #5 if (!clock_stopped) clock = ~clock;
 
 
 //----> Task para el reset
@@ -61,11 +63,11 @@ endtask
 
 // Descomentar solo uno de estos defines para ejecutar un test a la vez.
 `define TEST1
-// `define TEST2
-// `define TEST3
-// `define TEST4
-// `define TEST5
-// `define TEST6
+//`define TEST2
+//`define TEST3
+//`define TEST4
+//`define TEST5
+//`define TEST6
 
 `ifdef TEST1 //enable
 
@@ -128,63 +130,141 @@ endtask
   end
 `endif
 
-`ifdef TEST2 //reset
-  reg [N_LED-1:0] estado_leds = 'b0;
-  
-  initial 
+`ifdef TEST2 // reset
+  reg [N_LED-1:0] estado_objetivo;
+  reg [N_LED-1:0] estado_pre_reset;
+  integer i;
+  integer timeout;
+
+  localparam [N_LED-1:0] VALOR_RESET = 4'b1000;
+
+  initial
   begin
-    force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
-    force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
-    force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
-    force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+    force u_top_leds.u_counter.limit_0 = 32'h0000_0010;
+    force u_top_leds.u_counter.limit_1 = 32'h0000_0020;
+    force u_top_leds.u_counter.limit_2 = 32'h0000_0040;
+    force u_top_leds.u_counter.limit_3 = 32'h0000_0080;
 
-    for(integer i=0; i<100; i=i+1)
-    begin 
-      i_sw[0] = 1'b1;
-      #($urandom_range(1,5)*1us);
+    i_sw = 4'b0000;
+    i_reset = 1'b1;
+    estado_objetivo = 4'b0000;
+    estado_pre_reset = 4'b0000;
+    timeout = 0;
+
+    for(i=0; i<100; i=i+1)
+    begin
+      i_sw[3:1] = $urandom_range(0,7);
+      i_sw[0]   = 1'b0;
+
       reset();
-      //esto porque debemos esperar que se actualice los valores de los leds con el siguiente ciclo de clock
-      @(posedge clock);
-      estado_leds = o_led;
-      if(estado_leds != 4'b1000)
-      begin 
-        $display("ERROR: El valor de reset es incorrecto");
-        $display("test failed");
-        //el parametro 2 indica retorno con error
-        $finish(2);
-      end 
-    end
-    $display ("TEST PASSED");
-    $finish();
-  end 
 
-`endif 
+      #1;
+
+      if(o_led != VALOR_RESET)
+      begin
+        $display("ERROR: Reset con enable=0 incorrecto. Leido: %b, esperado: %b", o_led, VALOR_RESET);
+        $display("TEST FAILED en iteracion %0d", i);
+        $finish(2);
+      end
+
+      if(u_top_leds.u_counter.counter != 32'd0)
+      begin
+        $display("ERROR: Counter no quedo en 0 con enable=0. Leido: %0d", u_top_leds.u_counter.counter);
+        $display("TEST FAILED en iteracion %0d", i);
+        $finish(2);
+      end
+
+      // Activo enable
+      @(negedge clock);
+      i_sw[0] = 1'b1;
+
+      // Elijo un estado donde el salto a 8 NO sea natural
+      if($urandom_range(0,1))
+        estado_objetivo = 4'b0100; // 4
+      else
+        estado_objetivo = 4'b0010; // 2
+
+      // Espero a que el circuito salga del estado inicial
+      timeout = 0;
+
+      // Espero hasta que el LED llegue a 4 o 2
+      while(o_led != estado_objetivo && timeout < 500)
+      begin
+        @(posedge clock);
+        #1;
+        timeout = timeout + 1;
+      end
+
+      if(o_led != estado_objetivo)
+      begin
+        $display("ERROR: El circuito no llego al estado objetivo antes del reset.");
+        $display("Estado objetivo: %b, estado actual: %b", estado_objetivo, o_led);
+        $display("TEST FAILED en iteracion %0d", i);
+        $finish(2);
+      end
+
+      estado_pre_reset = o_led;
+
+      // Aplico reset en mitad del ciclo, no justo en el posedge
+      #($urandom_range(2,7));
+
+      reset();
+
+      #1;
+
+      if(o_led != VALOR_RESET)
+      begin
+        $display("ERROR: Reset con enable=1 incorrecto.");
+        $display("Estado antes del reset: %b", estado_pre_reset);
+        $display("Leido: %b, esperado: %b", o_led, VALOR_RESET);
+        $display("TEST FAILED en iteracion %0d", i);
+        $finish(2);
+      end
+
+      if(u_top_leds.u_counter.counter != 32'd0)
+      begin
+        $display("ERROR: Counter no quedo en 0 con enable=1. Leido: %0d", u_top_leds.u_counter.counter);
+        $display("TEST FAILED en iteracion %0d", i);
+        $finish(2);
+      end
+    end
+
+    $display("TEST PASSED");
+    $finish();
+  end
+
+`endif
 
 function verificar_color_verde;
 begin
-  verificar_color_verde = (i_sw[3] == 1'b0 && o_led_g == u_top_leds.led_enable);
+  verificar_color_verde = (i_sw[3] == 1'b0 && o_led_g == u_top_leds.led_enable && o_led_b == 4'b0000);
 end
 endfunction
 
 function verificar_color_azul;
 begin
-    verificar_color_azul = (i_sw[3]==1'b1 && o_led_b == u_top_leds.led_enable);
+    verificar_color_azul = (i_sw[3]==1'b1 && o_led_b == u_top_leds.led_enable && o_led_g == 4'b0000);
 end
 endfunction
 
 `ifdef TEST3 //color de leds
   initial
   begin
-    i_sw[3] = 1'b0;
+    i_reset = 1'b1;
+    i_sw = 4'b0000;
     force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
     force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
     force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
     force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
-
+    
+    reset();
+    
     for(integer i=0; i<100; i=i+1)
     begin
-      i_sw[3] = $urandom_range(0,1);
-      i_sw[0] = $urandom_range(0,1);
+      i_sw[3:1] = $urandom_range(0,7);
+      i_sw[0] = 1'b1;
+      
+      @(posedge clock);
       if(i_sw[3]==1'b1)
       begin
         if(!verificar_color_azul())
@@ -210,32 +290,75 @@ endfunction
 `endif
 
 
-`ifdef TEST4 //clock
+`ifdef TEST4 // clock detenido
+
   reg [N_LED-1:0] estado_leds;
+  reg [NB_COUNTER-1:0] estado_counter;
+  integer i;
+
   initial
   begin
-    force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
-    force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
-    force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
-    force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+    force u_top_leds.u_counter.limit_0 = 32'h0000_0010;
+    force u_top_leds.u_counter.limit_1 = 32'h0000_0020;
+    force u_top_leds.u_counter.limit_2 = 32'h0000_0040;
+    force u_top_leds.u_counter.limit_3 = 32'h0000_0080;
 
-    for(integer i=0; i<100; i=i+1)
+    i_sw = 4'b0001;
+    i_reset = 1'b1;
+    clock_stopped = 1'b0;
+    estado_leds = {N_LED{1'b0}};
+    estado_counter = {NB_COUNTER{1'b0}};
+
+    reset();
+
+    for(i=0; i<100; i=i+1)
     begin
+      // dejo avanzar el circuito un tiempo random
+      #($urandom_range(100,500));
+
+      // muestreo luego de un flanco, evitando race
+      @(posedge clock);
+      #1;
+
+      estado_leds    = o_led;
+      estado_counter = u_top_leds.u_counter.counter;
+
+      // detengo clock
+      clock_stopped = 1'b1;
+
+      // espero con clock detenido
       #($urandom_range(1,5)*1us);
-      force clock = 1'b0;
-      estado_leds = o_led;
-      #($urandom_range(1,5)*1us);
+
+      // verifico que no haya cambios sin clock
       if(estado_leds != o_led)
       begin
-        release clock;
-        $display("ERROR: Cambio de estado asincronico");
+        clock_stopped = 1'b0;
+        $display("ERROR: o_led cambio con clock detenido");
+        $display("Esperado: %b, leido: %b", estado_leds, o_led);
+        $display("TEST FAILED en iteracion %0d", i);
         $finish(2);
       end
-      release clock;
+
+      if(estado_counter != u_top_leds.u_counter.counter)
+      begin
+        clock_stopped = 1'b0;
+        $display("ERROR: counter cambio con clock detenido");
+        $display("Esperado: %0d, leido: %0d", estado_counter, u_top_leds.u_counter.counter);
+        $display("TEST FAILED en iteracion %0d", i);
+        $finish(2);
+      end
+
+      // reactivo clock
+      clock_stopped = 1'b0;
+
+      @(posedge clock);
+      #1;
     end
+
     $display("TEST PASSED");
     $finish();
   end
+
 `endif
 
 function [0:0] limite_incorrecto;
@@ -255,17 +378,26 @@ endfunction
 reg [31:0] count;
 reg [N_LED-1:0] esperado;
 reg [N_LED-1:0] estado_actual;
+reg [31:0] timeout;
 initial
 begin
   force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
   force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
   force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
   force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+  i_sw = 4'b0000;
+  i_reset = 1'b1;
+  count = 32'd0;
+  esperado = 4'b0000;
+  estado_actual = 4'b0000;
+  timeout = 32'd0;
+  reset();
 
   for(integer i=0; i<100; i=i+1)
   begin
     count = 'b0;
-    #($urandom_range(1,5)*1us)
+    timeout = 'b0;
+    #($urandom_range(1,5)*1us);
     i_sw[2:1] = $urandom_range(0,3);
     //reseteo para conocer el valor inicial
     reset();
@@ -275,26 +407,42 @@ begin
     estado_actual = o_led;
     //debido que al resetear el circuito counter=0 entonces o_shift=1 
     //se produce el shift instantaneamente luego del reset, por lo que ignoro el primer shift
-    while(o_led == estado_actual)
+    timeout = 'b0;
+
+    while(o_led == estado_actual && timeout < 500)
     begin
       @(posedge clock);
       #1;
+      timeout = timeout + 1;
+    end
+
+    if(timeout >= 500)
+    begin
+      $display("ERROR: Timeout esperando el primer shift");
+      $finish(2);
     end
 
     //alamceno valor luego del primer shift
     estado_actual = o_led;
     //mientras no cambie de estado, cuento flancos de clock
-    while (o_led == estado_actual) 
+    timeout = 'b0;
+    while (o_led == estado_actual && timeout < 500) 
     begin
       @(posedge clock);
       #1; //espero un tiempo para que se actualicen los registros
       count=count+1;
+      timeout = timeout + 1;
     end
     //verifico que haga el shift de manera correcta
     esperado = {estado_actual[0], estado_actual[3:1]};
     if(o_led != esperado)
     begin
-        $display("ERROR: Valor de shift incorrecto");
+      $display("ERROR: Shifteo incorrecto");
+      $finish(2);
+    end
+    if(timeout >= 500)
+    begin
+        $display("ERROR: Timeout esperado cambio por limite");
         $finish(2);
     end
     //cambio el estado del led, verifico si efectivamente el cambio fue en el valor del limite
@@ -313,12 +461,19 @@ end
 reg [N_LED-1:0] valor_actual;
 reg [N_LED-1:0] esperado;
 reg [NB_COUNTER-1:0] count;
+reg [31:0] timeout;
 initial 
 begin
   force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
   force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
   force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
   force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
+  i_sw = 4'b0000;
+  i_reset = 1'b1;
+  valor_actual = 4'b0000;
+  esperado = 4'b0000;
+  count = 32'd0;
+  timeout = 32'd0;
 
   for(integer i=0; i<100; i=i+1)
   begin
@@ -363,20 +518,36 @@ begin
     //cuando el enable esta activado
     else
     begin
+      timeout = 0;
       //luego del reset count=0 entonces cambia inmediatamente, obvio ese primer shift
-      while(valor_actual == o_led)
+      while(valor_actual == o_led && timeout < 500)
       begin
         @(posedge clock);
+        #1; //se agrega para evitar race conditions
+        timeout = timeout + 1;
       end
-
+      if(timeout >= 500)
+      begin
+        $display("ERROR: Timeout esperando el primer shift");
+        $finish(2);
+      end
       //pasado el primer shift guardamos el estado real para verificar el shift con el limite
       valor_actual = o_led;
       //aseguro que el contador empiece en 0
       count = 'b0;
-      while(valor_actual == o_led)
+      timeout = 'b0;
+      while(valor_actual == o_led && timeout < 500)
       begin
         @(posedge clock);
+        //espero 1us para que se actualicen los registros y el contador y evitar race conditions
+        #1;
         count = count + 1;
+        timeout = timeout + 1;
+      end
+      if(timeout >= 500)
+      begin
+        $display("ERROR: Timeout esperando el cambio de estado por limite");
+        $finish(2);
       end
       //cuando sale del while es porque shifteo es porque shifteo, compruebo que shiftee correctamente
       esperado = {valor_actual[0], valor_actual[3:1]};
@@ -392,58 +563,28 @@ begin
         $finish(2);
       end
     end
+    if(i_sw[3] == 1'b1)
+    begin
+      if(!verificar_color_azul())
+      begin
+        $display("ERROR: COLOR INCORRECTO CON ENABLE ACTIVADO");
+        $finish(2);
+      end
+    end
+    else
+    begin
+      if(!verificar_color_verde())
+      begin
+        $display("ERROR: COLOR INCORRECTO EN TEST DE INTEGRACION");
+        $finish(2);
+      end
+    end
   end
   $display("TEST: PASSED");
   $finish();
 end  
 
 `endif
-
-// `ifdef TEST6 //test de integracion
-//   reg [N_LED-1:0] estado_actual;
-//   reg [N_LED-1:0] esperado;
-//   reg [31:0] count;
-//   initial 
-//   begin
-//   force u_top_leds.u_counter.limit_0   = 32'h0000_0010;
-//   force u_top_leds.u_counter.limit_1   = 32'h0000_0020;
-//   force u_top_leds.u_counter.limit_2   = 32'h0000_0040;
-//   force u_top_leds.u_counter.limit_3   = 32'h0000_0080;
-  
-//   for(integer i=0; i<100; i=i+1)
-//   begin
-//     i_sw[3:0] = $urandom_range(0,15);
-//     reset();
-//     estado_actual = o_led;
-//     count = 'b0;
-    
-//     #($urandom_range(1,5)*1us);
-//     if(i_sw[0] == 0 && o_led != estado_actual)
-//     begin
-//       $display("ERROR: Cambio el estado de los leds con el enable desactivado");
-//       $finish(2);
-//     end
-//     else if(i_sw[0] == 1)
-//     begin
-//       if(i_sw[3] == 0 && (!verificar_color_verde() || limite_incorrecto(count)))
-//       begin
-//         $display("ERROR: Fallo el test");
-//         $finish(2);
-//       end
-//       else if(i_sw[3] == 1 && (!verificar_color_azul() || limite_incorrecto(count)))
-//       begin
-//         $display("ERROR: Fallo el test");
-//         $finish(2);
-//       end
-//     end
-//   end
-//   $display("TEST PASSED");
-//   $finish();
-
-//  end
-
-//`endif
-
 
 endmodule
 
