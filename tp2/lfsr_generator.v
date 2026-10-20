@@ -1,17 +1,18 @@
 module LFSR16_1002D #(
-  parameter DEFAULT_SEED = 16'hFFFF
+  parameter DEFAULT_SEED = 16'hFFFF,
+  parameter N_BITS = 16
 )(
   input clock,
   input i_reset,
   input i_valid,
-  input [15:0] i_seed,
+  input [N_BITS-1:0] i_seed,
   input i_soft_reset,
-  output reg [15:0] LFSR
+  output reg [N_BITS-1:0] LFSR
 );
 
-wire feedback = LFSR[15];
+wire feedback = LFSR[N_BITS-1];
 
-always @(posedge clk or posedge i_reset)
+always @(posedge clock or posedge i_reset)
 begin
   if (i_reset)
     LFSR <= DEFAULT_SEED;
